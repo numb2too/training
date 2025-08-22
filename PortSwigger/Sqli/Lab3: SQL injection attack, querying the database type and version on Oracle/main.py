@@ -3,7 +3,7 @@ import requests
 from typing import Optional, Tuple
 
 # 設定常數
-BASE_URL = "https://0a7200560328ba1a80dc08d1005c00e7.web-security-academy.net/filter"
+BASE_URL = "https://0ace00a703bc4e448005086f00b200d2.web-security-academy.net/filter"
 PARAM_NAME = "category"
 TIMEOUT = 10
 COMMENT = "-- "  # SQL 註解符號
