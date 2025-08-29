@@ -1,0 +1,3 @@
+沒有burpsuite pro 沒辦法使用collaborator
+就沒辦法用DMS偵測
+目前無解
