@@ -1,17 +1,16 @@
 import requests 
 
-USERNAME = "user"
-PASSWORD = "user"
-ARCHIVE_NAME = "./py3/payload.tar"
+USERNAME = "normal1"
+PASSWORD = "normal1"
+ARCHIVE_NAME = "payload.tar"
 BASE_URL = "http://94.237.48.12:31159"
-
 
 def main():
     session = requests.Session()
     create_account(session)
     assert(login(session))
     assert(upload(session))
-    assert(get_test_text(session))
+    # assert(get_test_text(session))
 
 def create_account(session: requests.Session):
     data = {
@@ -51,17 +50,6 @@ def upload(session: requests.Session):
         return True
     else:
         print(f"Error while uploading archive!")
-        print(resp.text)
-        print()
-        return False
-
-def get_test_text(session: requests.Session):
-    resp = session.get(f"{BASE_URL}/static/test.txt")
-    if resp.ok:
-        print(f"Successfully got /static/test.txt!")
-        return True
-    else:
-        print(f"Error while getting /static/test.txt: {resp.status_code}")
         print(resp.text)
         print()
         return False

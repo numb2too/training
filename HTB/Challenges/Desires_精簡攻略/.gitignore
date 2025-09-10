@@ -1,0 +1,5 @@
+*.tar
+*.zip
+tmp_link*
+link
+*.txt

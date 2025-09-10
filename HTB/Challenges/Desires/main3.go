@@ -7,17 +7,13 @@ import (
 )
 
 func main() {
-	// 可透過find找路徑
-	// find . -name payload.zip
-	archiveFile := "./py2/payload.tar"
-	destination := "./folder1a/folder2a"
+	archiveFile := "./py3/payload.tar"
+	destination := "./folder1b/folder2b"
 
-	// Unarchive the zip file to the destination folder
 	err := archiver.Unarchive(archiveFile, destination)
 	if err != nil {
 		fmt.Println("解壓縮失敗:", err)
 	} else {
 		fmt.Println("解壓縮成功")
 	}
-
 }
